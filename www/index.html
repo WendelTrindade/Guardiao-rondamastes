@@ -1531,8 +1531,15 @@ const DB={
 function _tsLocal(k){
   try{return parseInt(localStorage.getItem('rm_ts_'+k)||'0',10);}catch(e){return 0;}
 }
+// Coleções que só o administrador edita (o vigia e o morador nunca gravam
+// nelas diretamente). Pra essas, não faz sentido comparar "quem mudou por
+// último" — é sempre o admin, então a nuvem é sempre a verdade. Isso evita
+// o problema de um celular ficar preso numa versão antiga (por relógio
+// errado, ou por ter guardado localmente antes de uma edição no painel).
+const _COLECOES_SO_ADMIN=['itens_veiculo','equipamentos','contratantes','veiculos','escala'];
 function _deveUsarRemoto(k,arrRemoto,arrLocal){
   if(!Array.isArray(arrRemoto))return false;
+  if(_COLECOES_SO_ADMIN.includes(k))return true;
   const remoteTs=arrRemoto._remoteTs||0;
   const localTs=_tsLocal(k);
   if(remoteTs>0&&localTs>0){
