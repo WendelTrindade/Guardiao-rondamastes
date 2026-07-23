@@ -5262,6 +5262,30 @@ function carregarHoraExtra(){
 function _dentroDeAppNativo(){
   return!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
 }
+// Dentro do app instalado, não existe "abrir nova aba" nem "baixar arquivo"
+// do jeito que um navegador comum faz — precisa salvar o arquivo de verdade
+// no celular (Filesystem) e chamar o Android pra abrir com algum app que
+// leia PDF (Share, que no Android mostra a lista de apps — incluindo os
+// visualizadores de PDF instalados, tipo Google PDF Viewer, Drive, etc.)
+async function _salvarEAbrirPdfNativo(pdf,nomeArquivo){
+  try{
+    const plugins=window.Capacitor&&window.Capacitor.Plugins;
+    const Filesystem=plugins&&plugins.Filesystem;
+    const Share=plugins&&plugins.Share;
+    if(!Filesystem||!Share){
+      console.warn('Plugins Filesystem/Share não encontrados em window.Capacitor.Plugins');
+      return false;
+    }
+    const base64Completo=pdf.output('datauristring');
+    const base64Puro=base64Completo.split(',')[1];
+    const resultado=await Filesystem.writeFile({path:nomeArquivo,data:base64Puro,directory:'CACHE'});
+    await Share.share({title:nomeArquivo,url:resultado.uri,dialogTitle:'Abrir relatório em PDF'});
+    return true;
+  }catch(e){
+    console.error('Falha ao salvar/abrir PDF pelo Filesystem+Share:',e);
+    return false;
+  }
+}
 function gerarPDF(plantaoId){
   if(_dentroDeAppNativo()){
     toast('📄 Nesse aplicativo, use o botão "🖤 Relatório Premium" (na aba Ocorrências do plantão) pra gerar o PDF.');
@@ -5788,27 +5812,31 @@ async function gerarRelatorioPremiumCompleto(){
 
     const nomeArquivo=`Relatorio_${(p.contratanteNome||p.localNome||'Guardiao').replace(/\s+/g,'_')}_${fmtData(p.inicio).replace(/\//g,'-')}.pdf`;
 
-    // Prioriza ABRIR o PDF direto (funciona de forma confiável dentro do
-    // aplicativo instalado — o WebView do Android costuma bloquear ou
-    // ignorar silenciosamente o download automático de arquivo).
     let abriu=false;
-    try{
-      const blobUrl=pdf.output('bloburl');
-      const aba=window.open(blobUrl,'_blank');
-      abriu=!!aba;
-    }catch(e){console.warn('Não foi possível abrir o PDF em nova aba:',e);}
-
-    // Tenta também disparar o download — em navegador comum funciona e some
-    // direto pra pasta de Downloads; dentro do app, se falhar, não tem problema
-    // porque o PDF já foi aberto acima.
-    try{pdf.save(nomeArquivo);}catch(e){console.warn('Download automático não disponível:',e);}
+    if(_dentroDeAppNativo()){
+      // Dentro do app instalado: salva o arquivo de verdade no celular e
+      // chama o Android pra abrir com um visualizador de PDF.
+      abriu=await _salvarEAbrirPdfNativo(pdf,nomeArquivo);
+      if(!abriu){
+        // Se por algum motivo os plugins nativos falharem, tenta do jeito
+        // "de navegador" mesmo assim — não custa tentar.
+        try{const blobUrl=pdf.output('bloburl');abriu=!!window.open(blobUrl,'_blank');}catch(e){}
+      }
+    }else{
+      // Fora do app (navegador comum): abre em nova aba e tenta baixar
+      try{
+        const blobUrl=pdf.output('bloburl');
+        abriu=!!window.open(blobUrl,'_blank');
+      }catch(e){console.warn('Não foi possível abrir o PDF em nova aba:',e);}
+      try{pdf.save(nomeArquivo);}catch(e){console.warn('Download automático não disponível:',e);}
+    }
 
     // Como pedido: depois de gerar, as fotos e a observação são descartadas
     limparFotosPremium();
     const obsEl=document.getElementById('obs-fotos-ocorrencia');
     if(obsEl)obsEl.value='';
 
-    toast(abriu?'✅ Relatório gerado e aberto! Se não aparecer, confira se abriu numa aba/janela nova.':'✅ Relatório gerado! Confira a pasta de Downloads do celular.');
+    toast(abriu?'✅ Relatório gerado! Escolha um app pra visualizar o PDF.':'⚠️ Relatório gerado, mas não consegui abrir sozinho. Tente de novo em instantes.');
   }catch(err){
     console.error('Erro ao gerar relatório completo:',err);
     toast('❌ Falha ao gerar o relatório.');
