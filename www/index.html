@@ -824,43 +824,10 @@ html,body{height:100%;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
             <h2>⚠️ Ocorrências</h2>
             <button class="btn btn-primary btn-sm" onclick="abrirModalOcorrencia()">+ Nova</button>
           </div>
-          <div class="text-xs mb-3" style="color:var(--muted);">Registre qualquer desvio, irregularidade ou situação fora do padrão observada no plantão — com fotos, se precisar.</div>
+          <div class="text-xs mb-3" style="color:var(--muted);">Registre qualquer desvio, irregularidade ou situação fora do padrão observada no plantão.</div>
           <div id="lista-ocorrencias-plantao"></div>
 
-          <div class="card mt-3">
-            <div class="card-title">📷 Fotos de Ronda</div>
-            <div class="text-xs mb-2" style="color:var(--muted);">Escolha a ronda e anexe as fotos daquele trajeto específico.</div>
-            <div id="sem-ronda-aviso" class="text-xs hidden mb-2" style="color:var(--amber);">⚠️ Finalize pelo menos 1 ronda pra poder anexar fotos.</div>
-            <div id="upload-fotos-ronda-wrap" class="hidden">
-              <div class="field"><label>Qual ronda?</label>
-                <select id="sel-ronda-fotos" onchange="renderizarGaleriaFotosRonda()"></select>
-              </div>
-              <div class="text-xs mb-2" style="color:var(--muted);">Toque no botão abaixo. Na tela que abrir, procure "Fotos" ou "Imagens" (costuma aparecer logo no início) e marque quantas quiser.</div>
-              <input type="file" id="input-fotos-ronda" multiple class="input-foto-visivel" onchange="processarFotosRonda(this)">
-              <div class="mt-2" style="background:rgba(240,180,41,.1);border:1px solid rgba(240,180,41,.3);border-radius:8px;padding:8px 10px;text-align:center;">
-                <span style="color:var(--gold);font-weight:800;font-size:15px;" id="contador-fotos-ronda">0 fotos</span>
-              </div>
-              <div id="status-processando-ronda" class="text-xs hidden" style="color:var(--gold);margin-top:6px;"></div>
-              <div class="preview-galeria" id="galeria-fotos-ronda"></div>
-            </div>
-          </div>
-
-          <div class="card mt-3">
-            <div class="card-title">⚠️ Fotos de Ocorrência</div>
-            <div class="text-xs mb-2" style="color:var(--muted);">Toque no botão abaixo. Na tela que abrir, procure "Fotos" ou "Imagens" (costuma aparecer logo no início) e marque quantas quiser.</div>
-            <input type="file" id="input-fotos-ocorrencia" multiple class="input-foto-visivel" onchange="processarFotos(this,'ocorrencia')">
-            <div class="mt-2" style="background:rgba(240,180,41,.1);border:1px solid rgba(240,180,41,.3);border-radius:8px;padding:8px 10px;text-align:center;">
-              <span style="color:var(--gold);font-weight:800;font-size:15px;" id="contador-fotos-ocorrencia">0 fotos</span>
-            </div>
-            <div id="status-processando-ocorrencia" class="text-xs hidden" style="color:var(--gold);margin-top:6px;"></div>
-            <div class="preview-galeria" id="galeria-fotos-ocorrencia"></div>
-            <div class="field mt-2">
-              <label>Observações sobre essas fotos (opcional)</label>
-              <textarea id="obs-fotos-ocorrencia" placeholder="Descreva o que essas fotos mostram..." style="min-height:60px;"></textarea>
-            </div>
-          </div>
-
-          <div class="text-xs mt-3" style="color:var(--muted);text-align:center;padding:8px;">📄 O relatório com essas fotos é gerado sozinho quando o plantão for encerrado.</div>
+          <div class="text-xs mt-3" style="color:var(--muted);text-align:center;padding:8px;">📋 O relatório completo do plantão fica disponível em "Meus Relatórios" assim que encerrar.</div>
         </div>
         <div class="divider mt-3"></div>
         <button class="ponto-btn saida" onclick="encerrarPlantao()">
@@ -1434,7 +1401,7 @@ html,body{height:100%;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
     <div id="relatorio-conteudo"></div>
     <div class="flex gap-3 mt-3">
       <button class="btn btn-outline" onclick="fecharModal('modal-relatorio')">Fechar</button>
-      <button class="btn btn-primary" onclick="gerarPDFAtual()">📄 Gerar PDF</button>
+      <button class="btn btn-primary" id="btn-gerar-pdf-relatorio" onclick="gerarPDFAtual()">📄 Gerar PDF</button>
     </div>
   </div>
 </div>
@@ -1750,16 +1717,6 @@ async function _verificarPlantaoFechadoRemotamente(){
   pararMonitoramentoCheckpoints();
   plantaoAtivo.fim=atual.fim;
 
-  let premiumGerado=false;
-  const totalFotosAnexadas=_totalFotosRonda()+(fotosPorTipo&&fotosPorTipo.ocorrencia?fotosPorTipo.ocorrencia.length:0);
-  if(totalFotosAnexadas>0){
-    try{await gerarRelatorioPremiumCompleto();premiumGerado=true;}catch(e){console.warn('Falha ao gerar Relatório Premium automaticamente:',e);}
-  }
-  if(premiumGerado){
-    const lista=DB.get('plantoes').map(p=>p.id===atual.id?{...p,premiumGerado:true}:p);
-    DB.set('plantoes',lista);
-  }
-
   try{
     localStorage.removeItem('rm_fotos_rascunho_'+plantaoAtivo.id);
     localStorage.removeItem('rm_sessao_ativa');
@@ -1772,7 +1729,7 @@ async function _verificarPlantaoFechadoRemotamente(){
   if(ativoView)ativoView.classList.add('hidden');
   if(semTurno)semTurno.classList.remove('hidden');
   try{popularSeletorRota();}catch(e){}
-  toast('🔴 Seu plantão foi encerrado pelo administrador.'+(premiumGerado?' 📄 Relatório Premium gerado.':''));
+  toast('🔴 Seu plantão foi encerrado pelo administrador. Confira o relatório em "Meus Relatórios".');
   setTimeout(()=>irPara('screen-meus-relatorios'),1800);
 }
 
@@ -4076,15 +4033,7 @@ async function finalizarPlantao(antecipado,motivo){
   }
   plantaoAtivo.fim=new Date().toISOString();plantaoAtivo.saidaAntecipada=antecipado;plantaoAtivo.motivoSaida=motivo;
 
-  // Gerar o Relatório Premium automaticamente, se o vigia anexou fotos durante o plantão
-  let premiumGerado=false;
-  const totalFotosAnexadas=_totalFotosRonda()+(fotosPorTipo&&fotosPorTipo.ocorrencia?fotosPorTipo.ocorrencia.length:0);
-  if(totalFotosAnexadas>0){
-    try{await gerarRelatorioPremiumCompleto();premiumGerado=true;}catch(e){console.warn('Falha ao gerar Relatório Premium automaticamente:',e);}
-  }
-
   plantaoAtivo.fotos=fotosP;plantaoAtivo.portaria=portariaP;plantaoAtivo.ckState=ckState;
-  plantaoAtivo.premiumGerado=premiumGerado;
   // Registrar KM rodados no veículo usado (não visível ao vigia)
   const kmR=calcularKmRodados(plantaoAtivo.checklist);
   if(kmR!==null&&plantaoAtivo.checklist&&plantaoAtivo.checklist.veiculoId)registrarKmVeiculo(plantaoAtivo.checklist.veiculoId,kmR);
@@ -4099,7 +4048,7 @@ async function finalizarPlantao(antecipado,motivo){
   checklistSalvo=false;fotosCk=[];rondasAtivas=[];rondaAtualIdx=null;
   document.getElementById('plantao-ativo-view').classList.add('hidden');
   document.getElementById('plantao-sem-turno').classList.remove('hidden');
-  toast((antecipado?'⚠️ Saída antecipada registrada.':'🔴 Plantão encerrado!')+(premiumGerado?' 📄 Relatório Premium gerado com sucesso.':''));
+  toast(antecipado?'⚠️ Saída antecipada registrada.':'🔴 Plantão encerrado! Relatório disponível em "Meus Relatórios".');
   setTimeout(()=>irPara('screen-meus-relatorios'),1200);
 }
 
@@ -4752,7 +4701,7 @@ function renderRelatoriosPorData(plantoes,divId){
               </div>
             </div>
             <div class="li-sub">${isAdmin?(p.localNome+' · '):''}Entrada: ${fmtH(p.inicio)} · Saída: ${fmtH(p.fim)}${p.horaPrevistaSaida?' · Prev: '+p.horaPrevistaSaida:''}</div>
-            <div class="mt-1">${s.badge}${isAdmin&&fotos.length?` <span class="badge badge-blue">📷 ${fotos.length} foto${fotos.length!==1?'s':''}</span>`:''}${p.premiumGerado?` <span class="badge badge-amber">📄 Relatório Premium gerado</span>`:''}</div>
+            <div class="mt-1">${s.badge}${isAdmin&&fotos.length?` <span class="badge badge-blue">📷 ${fotos.length} foto${fotos.length!==1?'s':''}</span>`:''}</div>
             ${fotoThumbsHtml}
           </div>
         </div>`;
@@ -5312,7 +5261,7 @@ async function _salvarEAbrirPdfNativo(pdf,nomeArquivo){
 }
 function gerarPDF(plantaoId){
   if(_dentroDeAppNativo()){
-    toast('📄 Nesse aplicativo, o relatório completo (com fotos) é gerado sozinho quando o plantão é encerrado.');
+    toast('📄 Gerar PDF não está disponível dentro do aplicativo. O relatório completo já fica disponível na tela, em "Meus Relatórios".');
     return;
   }
   const p=DB.get('plantoes').find(x=>x.id===plantaoId);
@@ -5562,6 +5511,8 @@ function verRelatorio(id){
   const p=DB.get('plantoes').find(x=>x.id===id);if(!p)return;
   const podeEditar=U&&(U.perfil==='admin'||U.perfil==='gerente');
   document.getElementById('relatorio-conteudo').innerHTML=gerarHtmlRelatorio(p,{mostrarFotos:true,podeEditar});
+  const btnPdf=document.getElementById('btn-gerar-pdf-relatorio');
+  if(btnPdf)btnPdf.classList.toggle('hidden',_dentroDeAppNativo());
   abrirModal('modal-relatorio');
 }
 function adicionarObsAdmin(){
