@@ -832,13 +832,20 @@ html,body{height:100%;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
 
           <div class="card mt-3">
             <div class="card-title">📷 Fotos de Ronda</div>
-            <div class="text-xs mb-2" style="color:var(--muted);">Toque no botão abaixo. Na tela que abrir, procure "Fotos" ou "Imagens" (costuma aparecer logo no início) e marque quantas quiser.</div>
-            <input type="file" id="input-fotos-ronda" multiple class="input-foto-visivel" onchange="processarFotos(this,'ronda')">
-            <div class="mt-2" style="background:rgba(240,180,41,.1);border:1px solid rgba(240,180,41,.3);border-radius:8px;padding:8px 10px;text-align:center;">
-              <span style="color:var(--gold);font-weight:800;font-size:15px;" id="contador-fotos-ronda">0 fotos</span>
+            <div class="text-xs mb-2" style="color:var(--muted);">Escolha a ronda e anexe as fotos daquele trajeto específico.</div>
+            <div id="sem-ronda-aviso" class="text-xs hidden mb-2" style="color:var(--amber);">⚠️ Finalize pelo menos 1 ronda pra poder anexar fotos.</div>
+            <div id="upload-fotos-ronda-wrap" class="hidden">
+              <div class="field"><label>Qual ronda?</label>
+                <select id="sel-ronda-fotos" onchange="renderizarGaleriaFotosRonda()"></select>
+              </div>
+              <div class="text-xs mb-2" style="color:var(--muted);">Toque no botão abaixo. Na tela que abrir, procure "Fotos" ou "Imagens" (costuma aparecer logo no início) e marque quantas quiser.</div>
+              <input type="file" id="input-fotos-ronda" multiple class="input-foto-visivel" onchange="processarFotosRonda(this)">
+              <div class="mt-2" style="background:rgba(240,180,41,.1);border:1px solid rgba(240,180,41,.3);border-radius:8px;padding:8px 10px;text-align:center;">
+                <span style="color:var(--gold);font-weight:800;font-size:15px;" id="contador-fotos-ronda">0 fotos</span>
+              </div>
+              <div id="status-processando-ronda" class="text-xs hidden" style="color:var(--gold);margin-top:6px;"></div>
+              <div class="preview-galeria" id="galeria-fotos-ronda"></div>
             </div>
-            <div id="status-processando-ronda" class="text-xs hidden" style="color:var(--gold);margin-top:6px;"></div>
-            <div class="preview-galeria" id="galeria-fotos-ronda"></div>
           </div>
 
           <div class="card mt-3">
@@ -1738,6 +1745,41 @@ function _alertasRelevantes(){
   }
   return[];
 }
+async function _verificarPlantaoFechadoRemotamente(){
+  if(!plantaoAtivo||!U||U.perfil!=='vigilante')return;
+  const atual=DB.get('plantoes').find(p=>p.id===plantaoAtivo.id);
+  if(!atual||!atual.fim||plantaoAtivo.fim)return; // continua aberto, ou já foi tratado localmente
+
+  // O plantão foi encerrado em outro lugar (o administrador encerrou remotamente)
+  pararMonitoramentoCheckpoints();
+  plantaoAtivo.fim=atual.fim;
+
+  let premiumGerado=false;
+  const totalFotosAnexadas=_totalFotosRonda()+(fotosPorTipo&&fotosPorTipo.ocorrencia?fotosPorTipo.ocorrencia.length:0);
+  if(totalFotosAnexadas>0){
+    try{await gerarRelatorioPremiumCompleto();premiumGerado=true;}catch(e){console.warn('Falha ao gerar Relatório Premium automaticamente:',e);}
+  }
+  if(premiumGerado){
+    const lista=DB.get('plantoes').map(p=>p.id===atual.id?{...p,premiumGerado:true}:p);
+    DB.set('plantoes',lista);
+  }
+
+  try{
+    localStorage.removeItem('rm_fotos_rascunho_'+plantaoAtivo.id);
+    localStorage.removeItem('rm_sessao_ativa');
+  }catch(e){}
+  clearInterval(timerHora);
+  plantaoAtivo=null;fotosP=[];portariaP=[];ckState={};
+  checklistSalvo=false;fotosCk=[];rondasAtivas=[];rondaAtualIdx=null;
+  const ativoView=document.getElementById('plantao-ativo-view');
+  const semTurno=document.getElementById('plantao-sem-turno');
+  if(ativoView)ativoView.classList.add('hidden');
+  if(semTurno)semTurno.classList.remove('hidden');
+  try{popularSeletorRota();}catch(e){}
+  toast('🔴 Seu plantão foi encerrado pelo administrador.'+(premiumGerado?' 📄 Relatório Premium gerado.':''));
+  setTimeout(()=>irPara('screen-meus-relatorios'),1800);
+}
+
 function verificarAlertasEmergencia(){
   if(!U)return;
   if(U.perfil==='cliente'){
@@ -1746,6 +1788,7 @@ function verificarAlertasEmergencia(){
     return;
   }
   if(U.perfil!=='admin'&&U.perfil!=='gerente'&&U.perfil!=='vigilante')return;
+  if(U.perfil==='vigilante')_verificarPlantaoFechadoRemotamente();
   const relevantes=_alertasRelevantes();
   const div=document.getElementById('alerta-emergencia-banner');
   if(!div)return;
@@ -3909,6 +3952,7 @@ function abaPlantao(aba,el){
   }
   if(aba==='ocorrencias'){
     renderListaOcorrencias();
+    popularSeletorRondaFotos();
   }
 }
 function encerrarPlantao(){
@@ -4032,7 +4076,16 @@ async function finalizarPlantao(antecipado,motivo){
     return;
   }
   plantaoAtivo.fim=new Date().toISOString();plantaoAtivo.saidaAntecipada=antecipado;plantaoAtivo.motivoSaida=motivo;
+
+  // Gerar o Relatório Premium automaticamente, se o vigia anexou fotos durante o plantão
+  let premiumGerado=false;
+  const totalFotosAnexadas=_totalFotosRonda()+(fotosPorTipo&&fotosPorTipo.ocorrencia?fotosPorTipo.ocorrencia.length:0);
+  if(totalFotosAnexadas>0){
+    try{await gerarRelatorioPremiumCompleto();premiumGerado=true;}catch(e){console.warn('Falha ao gerar Relatório Premium automaticamente:',e);}
+  }
+
   plantaoAtivo.fotos=fotosP;plantaoAtivo.portaria=portariaP;plantaoAtivo.ckState=ckState;
+  plantaoAtivo.premiumGerado=premiumGerado;
   // Registrar KM rodados no veículo usado (não visível ao vigia)
   const kmR=calcularKmRodados(plantaoAtivo.checklist);
   if(kmR!==null&&plantaoAtivo.checklist&&plantaoAtivo.checklist.veiculoId)registrarKmVeiculo(plantaoAtivo.checklist.veiculoId,kmR);
@@ -4047,7 +4100,7 @@ async function finalizarPlantao(antecipado,motivo){
   checklistSalvo=false;fotosCk=[];rondasAtivas=[];rondaAtualIdx=null;
   document.getElementById('plantao-ativo-view').classList.add('hidden');
   document.getElementById('plantao-sem-turno').classList.remove('hidden');
-  toast(antecipado?'⚠️ Saída antecipada registrada.':'🔴 Plantão encerrado!');
+  toast((antecipado?'⚠️ Saída antecipada registrada.':'🔴 Plantão encerrado!')+(premiumGerado?' 📄 Relatório Premium gerado com sucesso.':''));
   setTimeout(()=>irPara('screen-meus-relatorios'),1200);
 }
 
@@ -4700,7 +4753,7 @@ function renderRelatoriosPorData(plantoes,divId){
               </div>
             </div>
             <div class="li-sub">${isAdmin?(p.localNome+' · '):''}Entrada: ${fmtH(p.inicio)} · Saída: ${fmtH(p.fim)}${p.horaPrevistaSaida?' · Prev: '+p.horaPrevistaSaida:''}</div>
-            <div class="mt-1">${s.badge}${isAdmin&&fotos.length?` <span class="badge badge-blue">📷 ${fotos.length} foto${fotos.length!==1?'s':''}</span>`:''}</div>
+            <div class="mt-1">${s.badge}${isAdmin&&fotos.length?` <span class="badge badge-blue">📷 ${fotos.length} foto${fotos.length!==1?'s':''}</span>`:''}${p.premiumGerado?` <span class="badge badge-amber">📄 Relatório Premium gerado</span>`:''}</div>
             ${fotoThumbsHtml}
           </div>
         </div>`;
@@ -5700,9 +5753,16 @@ async function gerarRelatorioPremiumCompleto(){
       y+=6;
     }
 
-    const totalFotos=fotosPorTipo.ronda.length+fotosPorTipo.ocorrencia.length;
+    const totalFotos=_totalFotosRonda()+fotosPorTipo.ocorrencia.length;
     if(totalFotos){
-      desenharSecaoFotos(`FOTOS DE RONDA (${fotosPorTipo.ronda.length})`,fotosPorTipo.ronda);
+      // Uma seção separada pra cada ronda que teve foto anexada, na ordem certa
+      const numerosRonda=Object.keys(fotosPorTipo.ronda).map(Number).sort((a,b)=>a-b);
+      for(const num of numerosRonda){
+        const fotosDaRonda=fotosPorTipo.ronda[num];
+        if(fotosDaRonda&&fotosDaRonda.length){
+          desenharSecaoFotos(`RONDA #${num} — FOTOS (${fotosDaRonda.length})`,fotosDaRonda);
+        }
+      }
 
       const obsFotos=(document.getElementById('obs-fotos-ocorrencia')?.value||'').trim();
       if(fotosPorTipo.ocorrencia.length||obsFotos){
@@ -6033,12 +6093,13 @@ function renderListaRondas(){
 window.renderListaRondas=renderListaRondas;
 
 // ═══════════════════════════════════════════
-// FOTOS DO RELATÓRIO PREMIUM (separadas: ronda e ocorrência)
+// FOTOS DO RELATÓRIO PREMIUM (ronda separada por número, ocorrência simples)
 // ═══════════════════════════════════════════
-// Duas listas simples, só na memória desta tela — não vão pro IndexedDB, não
-// vão pro Firestore, não sobrevivem a um F5. Servem só pra montar o PDF na
-// hora; depois de gerar, são descartadas.
-let fotosPorTipo={ronda:[],ocorrencia:[]};
+// Só na memória desta tela — não vão pro IndexedDB, não vão pro Firestore,
+// não sobrevivem a um F5. Servem só pra montar o PDF na hora; depois de
+// gerar, são descartadas. fotosPorTipo.ronda é um objeto {numRonda: [fotos]}
+// pra manter cada ronda separada da outra.
+let fotosPorTipo={ronda:{},ocorrencia:[]};
 
 function _pareceImagem(arquivo){
   // Alguns gerenciadores de arquivos (usados quando o campo não restringe
@@ -6049,6 +6110,101 @@ function _pareceImagem(arquivo){
   const ext=(arquivo.name||'').toLowerCase().split('.').pop();
   return['jpg','jpeg','png','gif','webp','bmp','heic','heif'].includes(ext);
 }
+
+function _totalFotosRonda(){
+  return Object.values(fotosPorTipo.ronda||{}).reduce((s,arr)=>s+arr.length,0);
+}
+
+// Popular o seletor de rondas sempre que uma ronda for finalizada
+function popularSeletorRondaFotos(){
+  const sel=document.getElementById('sel-ronda-fotos');
+  const aviso=document.getElementById('sem-ronda-aviso');
+  const wrap=document.getElementById('upload-fotos-ronda-wrap');
+  if(!sel)return;
+  const concluidas=(typeof rondasAtivas!=='undefined'?rondasAtivas:[]).filter(r=>r.fim);
+  if(!concluidas.length){
+    sel.innerHTML='';
+    if(aviso)aviso.classList.remove('hidden');
+    if(wrap)wrap.classList.add('hidden');
+    return;
+  }
+  if(aviso)aviso.classList.add('hidden');
+  if(wrap)wrap.classList.remove('hidden');
+  const valorAnterior=sel.value;
+  sel.innerHTML=concluidas.map(r=>`<option value="${r.num}">Ronda #${r.num} (${r.hora||fmtH(r.inicio)})</option>`).join('');
+  if(valorAnterior&&concluidas.some(r=>String(r.num)===valorAnterior)){
+    sel.value=valorAnterior;
+  }else{
+    sel.value=concluidas[concluidas.length-1].num;
+  }
+  renderizarGaleriaFotosRonda();
+}
+window.popularSeletorRondaFotos=popularSeletorRondaFotos;
+
+async function processarFotosRonda(input){
+  const todosArquivos=Array.from(input.files);
+  if(!todosArquivos.length)return;
+  const sel=document.getElementById('sel-ronda-fotos');
+  const numRonda=sel?sel.value:'';
+  if(!numRonda){toast('⚠️ Escolha a ronda antes de anexar as fotos');input.value='';return;}
+  const arquivos=todosArquivos.filter(_pareceImagem);
+  const ignorados=todosArquivos.length-arquivos.length;
+  if(!arquivos.length){
+    toast('⚠️ Nenhum arquivo de imagem selecionado. Escolha fotos (jpg, png, etc.).');
+    input.value='';
+    return;
+  }
+  const statusEl=document.getElementById('status-processando-ronda');
+  statusEl.classList.remove('hidden');
+  let processadas=0,falhas=0;
+  if(!fotosPorTipo.ronda[numRonda])fotosPorTipo.ronda[numRonda]=[];
+  for(const arquivo of arquivos){
+    statusEl.textContent=`Processando foto ${processadas+1} de ${arquivos.length}...`;
+    try{
+      const foto=await lerEComprimirFoto(arquivo);
+      fotosPorTipo.ronda[numRonda].push(foto);
+    }catch(e){falhas++;}
+    processadas++;
+  }
+  statusEl.classList.add('hidden');
+  input.value='';
+  renderizarGaleriaFotosRonda();
+  const total=fotosPorTipo.ronda[numRonda].length;
+  if(falhas){
+    toast(`⚠️ ${processadas-falhas} foto(s) anexada(s) na Ronda #${numRonda}, ${falhas} falharam.`);
+  }else if(processadas===1){
+    toast(`✅ Foto adicionada na Ronda #${numRonda}! Total: ${total}.`);
+  }else{
+    toast(`✅ +${processadas} fotos na Ronda #${numRonda}! Total: ${total}.`);
+  }
+}
+window.processarFotosRonda=processarFotosRonda;
+
+function renderizarGaleriaFotosRonda(){
+  const sel=document.getElementById('sel-ronda-fotos');
+  const div=document.getElementById('galeria-fotos-ronda');
+  const contador=document.getElementById('contador-fotos-ronda');
+  if(!sel||!div)return;
+  const numRonda=sel.value;
+  const fotos=(numRonda&&fotosPorTipo.ronda[numRonda])?fotosPorTipo.ronda[numRonda]:[];
+  if(contador)contador.textContent=fotos.length===1?'1 foto anexada':fotos.length+' fotos anexadas';
+  div.innerHTML=fotos.map((f,idx)=>`
+    <div class="preview-item"><img src="${f.thumb}" loading="lazy">
+      <button class="btn-remover-foto" onclick="removerFotoRonda(${idx})">&times;</button>
+    </div>`).join('');
+}
+window.renderizarGaleriaFotosRonda=renderizarGaleriaFotosRonda;
+
+function removerFotoRonda(idx){
+  const sel=document.getElementById('sel-ronda-fotos');
+  const numRonda=sel?sel.value:'';
+  if(!numRonda||!fotosPorTipo.ronda[numRonda])return;
+  fotosPorTipo.ronda[numRonda].splice(idx,1);
+  renderizarGaleriaFotosRonda();
+}
+window.removerFotoRonda=removerFotoRonda;
+
+// Fotos de Ocorrência continuam simples, sem separar por número
 async function processarFotos(input,tipo){
   const todosArquivos=Array.from(input.files);
   if(!todosArquivos.length)return;
@@ -6106,8 +6262,8 @@ function removerFoto(tipo,idx){
 window.removerFoto=removerFoto;
 
 function limparFotosPremium(){
-  fotosPorTipo={ronda:[],ocorrencia:[]};
-  renderizarGaleriaFotos('ronda');
+  fotosPorTipo={ronda:{},ocorrencia:[]};
+  popularSeletorRondaFotos();
   renderizarGaleriaFotos('ocorrencia');
 }
 
