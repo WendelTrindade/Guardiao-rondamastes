@@ -804,14 +804,6 @@ html,body{height:100%;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
               </div>
               <div id="lista-checks-veiculo"></div>
             </div>
-            <div class="card mt-2" style="border-color:var(--amber);">
-              <div class="card-title">📝 Observações / Ocorrências</div>
-              <div id="lista-obs-ck" style="margin-bottom:12px;"></div>
-              <div class="field" style="margin-bottom:8px;">
-                <textarea id="ck-obs-nova" placeholder="Digite uma observação e clique em Adicionar..." style="min-height:60px;"></textarea>
-              </div>
-              <button class="btn btn-amber" style="color:#000;" onclick="adicionarObsCk()">+ Adicionar Observação</button>
-            </div>
             <button class="btn btn-green mt-2" onclick="salvarChecklist()">💾 Salvar Checklist</button>
           </div>
           <div id="checklist-salvo" class="hidden">
@@ -5795,14 +5787,28 @@ async function gerarRelatorioPremiumCompleto(){
     pdf.text(`Gerado em: ${new Date().toLocaleString('pt-BR')}`,pWidth-65,pHeight-8);
 
     const nomeArquivo=`Relatorio_${(p.contratanteNome||p.localNome||'Guardiao').replace(/\s+/g,'_')}_${fmtData(p.inicio).replace(/\//g,'-')}.pdf`;
-    pdf.save(nomeArquivo);
+
+    // Prioriza ABRIR o PDF direto (funciona de forma confiável dentro do
+    // aplicativo instalado — o WebView do Android costuma bloquear ou
+    // ignorar silenciosamente o download automático de arquivo).
+    let abriu=false;
+    try{
+      const blobUrl=pdf.output('bloburl');
+      const aba=window.open(blobUrl,'_blank');
+      abriu=!!aba;
+    }catch(e){console.warn('Não foi possível abrir o PDF em nova aba:',e);}
+
+    // Tenta também disparar o download — em navegador comum funciona e some
+    // direto pra pasta de Downloads; dentro do app, se falhar, não tem problema
+    // porque o PDF já foi aberto acima.
+    try{pdf.save(nomeArquivo);}catch(e){console.warn('Download automático não disponível:',e);}
 
     // Como pedido: depois de gerar, as fotos e a observação são descartadas
     limparFotosPremium();
     const obsEl=document.getElementById('obs-fotos-ocorrencia');
     if(obsEl)obsEl.value='';
 
-    toast('✅ Relatório completo gerado em um único arquivo!');
+    toast(abriu?'✅ Relatório gerado e aberto! Se não aparecer, confira se abriu numa aba/janela nova.':'✅ Relatório gerado! Confira a pasta de Downloads do celular.');
   }catch(err){
     console.error('Erro ao gerar relatório completo:',err);
     toast('❌ Falha ao gerar o relatório.');
