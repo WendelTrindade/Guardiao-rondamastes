@@ -1,0 +1,12 @@
+{
+  "appId": "br.com.rondamaster.vigia",
+  "appName": "Guardião Vigia",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "android": {
+    "allowMixedContent": true
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}
