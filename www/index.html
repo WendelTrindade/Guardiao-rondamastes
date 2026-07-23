@@ -147,6 +147,11 @@
           if(d&&d.dados){
             const fb=JSON.parse(d.dados);
             const tsMillis=(d.ts&&typeof d.ts.toMillis==='function')?d.ts.toMillis():0;
+            // Calibra o relógio local contra o do servidor: se o celular tiver
+            // a hora errada (comum em alguns aparelhos), as comparações de
+            // "quem mudou por último" ficariam erradas sem isso — causando
+            // dados diferentes entre o app e o painel.
+            if(tsMillis>0){window._relogioOffsetServidor=tsMillis-Date.now();}
             let resultado;
             try{
               const loc=JSON.parse(localStorage.getItem('rm_'+k)||'[]');
@@ -1515,7 +1520,7 @@ const DB={
     // Marcar quando essa coleção foi alterada aqui — usado para decidir,
     // em sincronizações futuras, se a versão local é mais nova que a da nuvem
     // (evita que uma exclusão feita aqui seja "desfeita" por um dado antigo remoto)
-    try{localStorage.setItem('rm_ts_'+k,Date.now().toString());}catch(e){}
+    try{localStorage.setItem('rm_ts_'+k,(Date.now()+(window._relogioOffsetServidor||0)).toString());}catch(e){}
     // Firebase: enviar agora se online; se falhar/offline, entra na fila pendente
     _syncFirebase(k,v);
   },
@@ -2042,6 +2047,9 @@ async function sincronizarDadosAdmin(silencioso){
       }
       if(document.getElementById('screen-relatorios')&&document.getElementById('screen-relatorios').classList.contains('active')){
         renderRelatoriosAdmin();
+      }
+      if(document.getElementById('screen-meus-relatorios')&&document.getElementById('screen-meus-relatorios').classList.contains('active')){
+        renderMeusRelatorios();
       }
       if(document.getElementById('screen-precadastros')&&document.getElementById('screen-precadastros').classList.contains('active')){
         renderPreCadastrosAdmin();
@@ -5267,23 +5275,40 @@ function _dentroDeAppNativo(){
 // leia PDF (Share, que no Android mostra a lista de apps — incluindo os
 // visualizadores de PDF instalados, tipo Google PDF Viewer, Drive, etc.)
 async function _salvarEAbrirPdfNativo(pdf,nomeArquivo){
+  // Retorna {ok:true} ou {ok:false, etapa:'...', erro:'...'} — assim dá pra
+  // mostrar uma mensagem exata de onde travou, em vez de só "não funcionou".
+  if(!window.Capacitor){
+    return{ok:false,etapa:'Capacitor não encontrado',erro:'window.Capacitor não existe'};
+  }
+  const plugins=window.Capacitor.Plugins;
+  if(!plugins){
+    return{ok:false,etapa:'Plugins não registrados',erro:'window.Capacitor.Plugins não existe'};
+  }
+  const Filesystem=plugins.Filesystem;
+  const Share=plugins.Share;
+  if(!Filesystem){
+    return{ok:false,etapa:'Plugin Filesystem ausente',erro:'Plugins disponíveis: '+Object.keys(plugins).join(', ')};
+  }
+  if(!Share){
+    return{ok:false,etapa:'Plugin Share ausente',erro:'Plugins disponíveis: '+Object.keys(plugins).join(', ')};
+  }
+  let uriArquivo;
   try{
-    const plugins=window.Capacitor&&window.Capacitor.Plugins;
-    const Filesystem=plugins&&plugins.Filesystem;
-    const Share=plugins&&plugins.Share;
-    if(!Filesystem||!Share){
-      console.warn('Plugins Filesystem/Share não encontrados em window.Capacitor.Plugins');
-      return false;
-    }
     const base64Completo=pdf.output('datauristring');
     const base64Puro=base64Completo.split(',')[1];
     const resultado=await Filesystem.writeFile({path:nomeArquivo,data:base64Puro,directory:'CACHE'});
-    await Share.share({title:nomeArquivo,url:resultado.uri,dialogTitle:'Abrir relatório em PDF'});
-    return true;
+    uriArquivo=resultado.uri;
   }catch(e){
-    console.error('Falha ao salvar/abrir PDF pelo Filesystem+Share:',e);
-    return false;
+    console.error('Falha ao salvar o PDF com Filesystem.writeFile:',e);
+    return{ok:false,etapa:'Salvar o arquivo (Filesystem.writeFile)',erro:(e&&e.message)||String(e)};
   }
+  try{
+    await Share.share({title:nomeArquivo,url:uriArquivo,dialogTitle:'Abrir relatório em PDF'});
+  }catch(e){
+    console.error('Falha ao abrir o menu de compartilhamento com Share.share:',e);
+    return{ok:false,etapa:'Abrir o menu de compartilhamento (Share.share)',erro:(e&&e.message)||String(e)};
+  }
+  return{ok:true};
 }
 function gerarPDF(plantaoId){
   if(_dentroDeAppNativo()){
@@ -5812,11 +5837,15 @@ async function gerarRelatorioPremiumCompleto(){
     const nomeArquivo=`Relatorio_${(p.contratanteNome||p.localNome||'Guardiao').replace(/\s+/g,'_')}_${fmtData(p.inicio).replace(/\//g,'-')}.pdf`;
 
     let abriu=false;
+    let detalheDiagnostico='';
     if(_dentroDeAppNativo()){
       // Dentro do app instalado: salva o arquivo de verdade no celular e
       // chama o Android pra abrir com um visualizador de PDF.
-      abriu=await _salvarEAbrirPdfNativo(pdf,nomeArquivo);
+      const resultadoNativo=await _salvarEAbrirPdfNativo(pdf,nomeArquivo);
+      abriu=resultadoNativo.ok;
       if(!abriu){
+        detalheDiagnostico=`Etapa: ${resultadoNativo.etapa}. Detalhe: ${resultadoNativo.erro}`;
+        console.error('Diagnóstico da falha ao abrir o PDF no app:',detalheDiagnostico);
         // Se por algum motivo os plugins nativos falharem, tenta do jeito
         // "de navegador" mesmo assim — não custa tentar.
         try{const blobUrl=pdf.output('bloburl');abriu=!!window.open(blobUrl,'_blank');}catch(e){}
@@ -5835,7 +5864,16 @@ async function gerarRelatorioPremiumCompleto(){
     const obsEl=document.getElementById('obs-fotos-ocorrencia');
     if(obsEl)obsEl.value='';
 
-    toast(abriu?'✅ Relatório gerado! Escolha um app pra visualizar o PDF.':'⚠️ Relatório gerado, mas não consegui abrir sozinho. Tente de novo em instantes.');
+    if(abriu){
+      toast('✅ Relatório gerado! Escolha um app pra visualizar o PDF.');
+    }else{
+      toast('⚠️ Relatório gerado, mas não consegui abrir sozinho.');
+      if(detalheDiagnostico){
+        // Mostra numa segunda mensagem, com tempo pra ler — ajuda a apontar
+        // exatamente onde travou, pra corrigir com precisão.
+        setTimeout(()=>toast('🔍 '+detalheDiagnostico),3500);
+      }
+    }
   }catch(err){
     console.error('Erro ao gerar relatório completo:',err);
     toast('❌ Falha ao gerar o relatório.');
