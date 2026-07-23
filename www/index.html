@@ -855,8 +855,7 @@ html,body{height:100%;font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
             </div>
           </div>
 
-          <button class="btn btn-outline mt-3" style="border-color:#D4AF37;color:#D4AF37;" onclick="gerarRelatorioPremiumCompleto()">🖤 Gerar Relatório Premium</button>
-          <div class="text-xs mt-1" style="color:var(--muted);text-align:center;">Gera o PDF com as fotos de ronda e de ocorrência, cada uma na sua seção.</div>
+          <div class="text-xs mt-3" style="color:var(--muted);text-align:center;padding:8px;">📄 O relatório com essas fotos é gerado sozinho quando o plantão for encerrado.</div>
         </div>
         <div class="divider mt-3"></div>
         <button class="ponto-btn saida" onclick="encerrarPlantao()">
@@ -5288,7 +5287,7 @@ async function _salvarEAbrirPdfNativo(pdf,nomeArquivo){
 }
 function gerarPDF(plantaoId){
   if(_dentroDeAppNativo()){
-    toast('📄 Nesse aplicativo, use o botão "🖤 Relatório Premium" (na aba Ocorrências do plantão) pra gerar o PDF.');
+    toast('📄 Nesse aplicativo, o relatório completo (com fotos) é gerado sozinho quando o plantão é encerrado.');
     return;
   }
   const p=DB.get('plantoes').find(x=>x.id===plantaoId);
